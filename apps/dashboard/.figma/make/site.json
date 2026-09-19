@@ -1,0 +1,10 @@
+{
+  "description": "Provides a clear, real-time dashboard to securely manage AI agent identities, permissions, and actions with instant revocation and transparent audit logs.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

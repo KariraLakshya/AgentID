@@ -1,0 +1,154 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+}
+
+:root {
+  /* Main content: rust orange × cream blend */
+  --background: #FBF3EA;
+  --foreground: #2B1A10;
+  --card: #FFFEFC;
+  --card-foreground: #2B1A10;
+  --primary: #B7410E;
+  --primary-foreground: #ffffff;
+  --secondary: #F5E7D6;
+  --secondary-foreground: #5A4632;
+  --muted: #F5E7D6;
+  --muted-foreground: #8C7863;
+  --accent: #B7410E;
+  --accent-foreground: #ffffff;
+  --border: #EBDCC6;
+  --ring: #B7410E;
+  --success: #15803D;
+  --danger: #B91C1C;
+  --warning: #CA8A04;
+  --radius: 10px;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', monospace;
+
+  /* Sidebar: same rust family, deep & warm instead of navy */
+  --sidebar-bg: linear-gradient(180deg, #3B2013 0%, #29150C 100%);
+  --sidebar-border: rgba(255, 237, 213, 0.10);
+  --sidebar-foreground: #FBEEDD;
+  --sidebar-muted: #BB9C82;
+  --sidebar-accent-gradient: linear-gradient(135deg, #EA6A2E 0%, #B7410E 100%);
+  --sidebar-glow: rgba(234, 106, 46, 0.35);
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(43, 26, 16, 0.05);
+  --shadow-md: 0 1px 3px rgba(43, 26, 16, 0.06), 0 4px 14px rgba(183, 65, 14, 0.07);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--background);
+  /* Soft cloud-like glows in warm rust/gold tones, plus a faint dot-grid
+     texture underneath for a subtle "agentic network" feel. */
+  background-image:
+    radial-gradient(circle at 6% 8%, rgba(234, 106, 46, 0.16) 0%, transparent 38%),
+    radial-gradient(circle at 95% 4%, rgba(183, 65, 14, 0.11) 0%, transparent 34%),
+    radial-gradient(circle at 88% 92%, rgba(202, 138, 4, 0.09) 0%, transparent 42%),
+    radial-gradient(circle at 10% 95%, rgba(255, 255, 255, 0.5) 0%, transparent 40%),
+    radial-gradient(rgba(183, 65, 14, 0.07) 1px, transparent 1.6px);
+  background-size: auto, auto, auto, auto, 26px 26px;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
+  background-attachment: fixed, fixed, fixed, fixed, fixed;
+  color: var(--foreground);
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #DCC7A8;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #C7AC85;
+}
+
+.mono {
+  font-family: var(--font-family-mono);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes revoke-flash {
+  0% { background-color: #B91C1C20; }
+  50% { background-color: #B91C1C40; }
+  100% { background-color: #B91C1C10; }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease forwards;
+}
+
+.live-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.15);
+}
+
+.revoke-flash {
+  animation: revoke-flash 0.6s ease;
+}
