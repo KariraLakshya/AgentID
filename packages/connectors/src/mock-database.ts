@@ -1,10 +1,17 @@
 import { err, ok } from "@custos/contracts";
 import { createRevocationGuard, type Connector } from "./connector.js";
 
+// Deliberately carries real-shaped PII (a genuine-format SSN, a Luhn-valid
+// test card number, real-looking emails) so `@custos/core`'s live PII scan
+// has something honest to actually find, not a rigged demo fixture.
 const FAKE_TABLES: Record<string, readonly Record<string, unknown>[]> = {
   customers: [
-    { id: 1, name: "Ada Lovelace" },
-    { id: 2, name: "Alan Turing" },
+    { id: 1, name: "Ada Lovelace", email: "ada@example.com", ssn: "078-05-1120" },
+    { id: 2, name: "Alan Turing", email: "alan@example.com", ssn: "219-09-9999" },
+  ],
+  payments: [
+    { id: 1, customerId: 1, cardNumber: "4111111111111111", amount: 4200 },
+    { id: 2, customerId: 2, cardNumber: "5500000000000004", amount: 1999 },
   ],
 };
 

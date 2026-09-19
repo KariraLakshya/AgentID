@@ -14,6 +14,11 @@ import { invokeTool } from "./calls/invoke.js";
 import { createRevocationCache, type RevocationCache } from "./revocation/cache.js";
 import { grantToolAccess } from "./policy/policy.js";
 import {
+  grantDataCategory,
+  loadDataGrantCache,
+  type DataGrantCache,
+} from "./policy/data-grants.js";
+import {
   createHttpAuditReporter,
   createNoopAuditReporter,
   type AuditReporter,
@@ -48,6 +53,11 @@ const tombstoneSchema = z.object({
 const grantSchema = z.object({
   agentId: z.string().min(1),
   tool: z.string().min(1),
+});
+
+const dataGrantSchema = z.object({
+  agentId: z.string().min(1),
+  category: z.string().min(1),
 });
 
 function statusFor(code: string): number {
@@ -90,6 +100,8 @@ export async function buildServer(options: {
   readonly revocationResyncIntervalMs?: number;
   /** Base URL of the audit service. Omitted: audit reporting is a no-op. */
   readonly auditUrl?: string;
+  /** Omitted: loaded from `agent_data_grants` at boot, same as production. */
+  readonly dataGrants?: DataGrantCache;
 }): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ loggerInstance: createLogger({ level: "silent" }) });
   const { db, cipher } = options;
@@ -105,6 +117,7 @@ export async function buildServer(options: {
         onError: (error) => app.log.warn({ err: error }, "audit report failed"),
       })
     : createNoopAuditReporter();
+  const dataGrants = options.dataGrants ?? (await loadDataGrantCache(db));
 
   const revocation =
     options.revocation ??
@@ -185,6 +198,22 @@ export async function buildServer(options: {
     return { agentId: granted.agentDid, tool: granted.tool };
   });
 
+  app.post("/data-grants", async (request, reply) => {
+    const body = dataGrantSchema.safeParse(request.body);
+    if (!body.success) {
+      reply.code(400);
+      return { error: "INVALID_INPUT" };
+    }
+    const granted = await grantDataCategory({
+      db,
+      agentDid: body.data.agentId,
+      category: body.data.category,
+    });
+    dataGrants.grant(granted.agentDid, granted.category);
+    reply.code(201);
+    return { agentId: granted.agentDid, category: granted.category };
+  });
+
   app.post("/credentials", async (request, reply) => {
     const body = storeCredentialSchema.safeParse(request.body);
     if (!body.success) {
@@ -238,6 +267,7 @@ export async function buildServer(options: {
       now: clock.now(),
       revocation,
       audit,
+      dataGrants,
     });
     if (!result.ok) {
       reply.code(statusFor(result.error.code));

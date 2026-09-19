@@ -6,6 +6,23 @@ This is not the technical handover (that's section 0 of `CLAUDE.md`, written for
 
 ---
 
+## 2026-09-19 — Data layer: live per-agent PII redaction (hackathon feature, post-Phase-4)
+
+**What this is:** a second USP for the hackathon pitch, on top of the identity/access trust layer. The pitch: different agents in an organisation should see different data through the same tool, the same way different employees do. Custos now enforces that for real — not a declared label, a live scan of what a tool call actually returned.
+
+**How it works:**
+
+- `@custos/core` gained `scanAndRedact()` — a pattern-based PII detector (email, phone, SSN, credit card with a Luhn checksum, IP address) that walks a tool response and masks any category it finds. Deliberately not sold as ML-grade classification — it's honest regex matching, the same class of technique real DLP tools use for structured data, distinct from (and much lighter than) the OCR/vision-based document inspection this project has separately and deliberately left out of scope.
+- The vault runs this scan on every successful tool call, after the connector responds. A new `agent_data_grants` table (deny-by-default, same posture as the Phase 4 tool allowlist) says which categories a given agent may see unmasked — checked via an in-memory cache so the scan and the gate both stay off the hot-path network-call rule. `custos grant-data <category> --credential <path>` grants one.
+- Every call's existing audit record now also carries `detectedCategories` and `redactedCategories` — so the trail proves not just that an action was allowed, but exactly what data it touched and what was withheld, per agent, per call.
+- Live-verified end to end: two agents (support, finance) both granted the same `mock-database` tool; only finance granted the `email` category. Same query, same underlying rows, run against the real built services — the support agent gets `email` and `ssn` both masked, the finance agent gets `email` in the clear and `ssn` still masked (never granted to anyone). `custos audit-log` independently verifies the finance agent's record and shows `detectedCategories: [email, ssn]`, `redactedCategories: [ssn]`.
+
+**Why it matters:** this is the second half of the two-USP pitch — "Custos already proves who an agent is and whether it may act; this is the same trust boundary applied one level deeper, to what it may see." Both halves are on the same cryptographically verifiable log.
+
+**Status:** built, fully tested (unit + integration + a dedicated end-to-end test mirroring the exact two-agent demo), and manually smoke-tested against the real running services — the transcript above is a real run, not a description. Not yet committed/pushed at the time of writing this entry.
+
+---
+
 ## 2026-09-19 — Recovery: a broken file transfer wiped Phase 4, and it's been rebuilt
 
 **What happened:** moving this project to a new machine, the copy of the repository got interrupted partway through. `packages/`, `services/`, and `tooling/` — 141 tracked files, the entire shared-library and backend-service code — never arrived on disk. Everything committed through Phase 3 (identity, dispossession, revocation) was recoverable straight from git history. The Phase 4 (authorization allowlists + signed audit trail) work described in the 2026-09-12 entry below was not: it had been built and verified locally but never committed, so there was no git object to fall back on, and the working copy was gone too.

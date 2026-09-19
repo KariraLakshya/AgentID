@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { pullAuditLog } from "./audit-log.js";
 import { deprovisionAgent } from "./deprovision.js";
 import { grantToolAccess } from "./grant.js";
+import { grantDataCategory } from "./grant-data.js";
 import { registerAgent } from "./register.js";
 import { loadAgentCredential, useTool } from "./use.js";
 import { loadCredentialFile, verifyCredentialIndependently } from "./verify.js";
@@ -80,6 +81,27 @@ export function createCli(): Command {
         vaultUrl: opts.vaultUrl,
         agentDid: credential.issuer,
         tool,
+      });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    });
+
+  program
+    .command("grant-data")
+    .description(
+      "Grant an agent permission to see one PII category unmasked (e.g. email, ssn, credit-card) wherever the vault's live scan finds it, across every tool",
+    )
+    .argument("<category>", "PII category, e.g. email, phone, ssn, credit-card, ip-address")
+    .requiredOption(
+      "--credential <path>",
+      "path to the agent's credential file (from `register --out`)",
+    )
+    .option("--vault-url <url>", "vault service base URL", "http://localhost:4002")
+    .action(async (category: string, opts: { credential: string; vaultUrl: string }) => {
+      const credential = await loadAgentCredential(opts.credential);
+      const result = await grantDataCategory({
+        vaultUrl: opts.vaultUrl,
+        agentDid: credential.issuer,
+        category,
       });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     });

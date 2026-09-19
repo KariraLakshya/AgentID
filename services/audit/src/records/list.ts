@@ -38,6 +38,12 @@ export async function listRecords(params: {
         dataCategories: row.dataCategories,
         policy: { rule: row.policyRule, decision: row.decision as "allow" | "deny" },
         ...(row.reason === null ? {} : { reason: row.reason }),
+        ...(row.detectedCategories === null || row.detectedCategories === undefined
+          ? {}
+          : { detectedCategories: row.detectedCategories }),
+        ...(row.redactedCategories === null || row.redactedCategories === undefined
+          ? {}
+          : { redactedCategories: row.redactedCategories }),
         recordedAt: row.recordedAt.toISOString(),
       },
       signer,

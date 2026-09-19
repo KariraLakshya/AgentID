@@ -19,6 +19,8 @@ export const auditRecords = pgTable("audit_records", {
   policyRule: text("policy_rule").notNull(),
   decision: text("decision").notNull(),
   reason: text("reason"),
+  detectedCategories: jsonb("detected_categories").$type<readonly string[]>(),
+  redactedCategories: jsonb("redacted_categories").$type<readonly string[]>(),
   recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

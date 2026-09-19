@@ -128,6 +128,9 @@ describe("verifyAuditRecord", () => {
       { ...recordFor(), policy: { rule: "allowlist", decision: "maybe" } },
     ],
     ["non-string dataCategories entry", { ...recordFor(), dataCategories: [1] }],
+    ["non-array detectedCategories", { ...recordFor(), detectedCategories: "email" }],
+    ["non-string detectedCategories entry", { ...recordFor(), detectedCategories: [1] }],
+    ["non-array redactedCategories", { ...recordFor(), redactedCategories: "email" }],
     ["null claims", null],
     ["array claims", []],
   ])("rejects correctly signed but structurally invalid claims (%s)", async (_label, claims) => {
@@ -138,5 +141,34 @@ describe("verifyAuditRecord", () => {
     const result = verifyAuditRecord({ record, publicKey });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("MALFORMED_RECORD");
+  });
+
+  it("rejects claims that are not JSON", async () => {
+    const { publicKey, secretKey } = generateKeyPair();
+    const encodedClaims = Buffer.from("this is not json", "utf8").toString("base64url");
+    const signature = sign(Buffer.from(encodedClaims, "utf8"), secretKey);
+    const result = verifyAuditRecord({
+      record: `${encodedClaims}.${Buffer.from(signature).toString("base64url")}`,
+      publicKey,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("MALFORMED_RECORD");
+  });
+
+  it("verifies a record that carries detectedCategories/redactedCategories", async () => {
+    const { publicKey, secretKey } = generateKeyPair();
+    const record = recordFor({
+      policy: { rule: "allowlist", decision: "allow" },
+      detectedCategories: ["email", "ssn"],
+      redactedCategories: ["ssn"],
+    });
+    const issued = await issueAuditRecord({ record, signer: signerFor(secretKey) });
+    if (!issued.ok) throw new Error("expected issuance to succeed");
+    const verified = verifyAuditRecord({ record: issued.value, publicKey });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) {
+      expect(verified.value.detectedCategories).toEqual(["email", "ssn"]);
+      expect(verified.value.redactedCategories).toEqual(["ssn"]);
+    }
   });
 });

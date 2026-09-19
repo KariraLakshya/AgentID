@@ -8,6 +8,8 @@ export interface AppendableRecord {
   readonly dataCategories: readonly string[];
   readonly policy: { readonly rule: string; readonly decision: "allow" | "deny" };
   readonly reason?: string;
+  readonly detectedCategories?: readonly string[];
+  readonly redactedCategories?: readonly string[];
   readonly recordedAt: string;
 }
 
@@ -29,6 +31,8 @@ export async function appendRecord(params: {
     policyRule: record.policy.rule,
     decision: record.policy.decision,
     reason: record.reason ?? null,
+    detectedCategories: record.detectedCategories ?? null,
+    redactedCategories: record.redactedCategories ?? null,
     recordedAt: new Date(record.recordedAt),
   });
 }

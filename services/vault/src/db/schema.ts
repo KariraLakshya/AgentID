@@ -31,3 +31,22 @@ export const agentPolicies = pgTable(
 
 export type AgentPolicyRow = typeof agentPolicies.$inferSelect;
 export type NewAgentPolicyRow = typeof agentPolicies.$inferInsert;
+
+/**
+ * Which PII categories (see `@custos/core`'s `PiiCategory`) an agent is
+ * allowed to see unmasked, independent of which tool a call goes through.
+ * Deny by default, same posture as `agentPolicies`: a category with no row
+ * here is redacted wherever a live scan finds it in a tool's response.
+ */
+export const agentDataGrants = pgTable(
+  "agent_data_grants",
+  {
+    agentDid: text("agent_did").notNull(),
+    category: text("category").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.agentDid, table.category] })],
+);
+
+export type AgentDataGrantRow = typeof agentDataGrants.$inferSelect;
+export type NewAgentDataGrantRow = typeof agentDataGrants.$inferInsert;

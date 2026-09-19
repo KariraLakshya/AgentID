@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { pullAuditLog } from "./audit-log.js";
 import { deprovisionAgent } from "./deprovision.js";
 import { grantToolAccess } from "./grant.js";
+import { grantDataCategory } from "./grant-data.js";
 import { registerAgent } from "./register.js";
 import { useTool } from "./use.js";
 import { verifyCredentialIndependently } from "./verify.js";
@@ -504,6 +505,81 @@ describe("custos grant + audit-log (Phase 4: authorization + audit)", () => {
           }));
           expect(decisions).toContainEqual({ tool: "mock-slack", decision: "allow" });
           expect(decisions).toContainEqual({ tool: "stripe", decision: "deny" });
+        },
+      );
+    },
+  );
+});
+
+describe("custos grant-data (data layer: per-agent PII access, live-scanned not declared)", () => {
+  it(
+    "two agents granted the same tool see different data through it — one holds a data grant " +
+      "the other doesn't, and the live scan enforces that per agent, per call, with the finding on the audit trail",
+    async () => {
+      await withPhase4Stack(
+        { identity: 4930, revocation: 4931, vault: 4932, audit: 4933 },
+        [createMockDatabaseConnector()],
+        async ({ identityUrl, vaultUrl, auditUrl }) => {
+          // Two agents, both allowed to query the same tool — this is not a
+          // per-tool distinction (Phase 4's allowlist), it's per-agent
+          // visibility into what that tool's response actually contains.
+          const support = await registerAgent(identityUrl);
+          const finance = await registerAgent(identityUrl);
+          const supportCredential = support.credential as SignedCredential;
+          const financeCredential = finance.credential as SignedCredential;
+
+          await fetch(new URL("/credentials", vaultUrl), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ tool: "mock-database", secret: "unused-by-the-mock" }),
+          });
+          for (const credential of [supportCredential, financeCredential]) {
+            await grantToolAccess({ vaultUrl, agentDid: credential.issuer, tool: "mock-database" });
+          }
+          // Only the finance agent is granted the email category. Neither
+          // agent is granted ssn — that stays redacted for both.
+          await grantDataCategory({
+            vaultUrl,
+            agentDid: financeCredential.issuer,
+            category: "email",
+          });
+
+          const query = (credential: SignedCredential) =>
+            useTool({
+              vaultUrl,
+              credential,
+              tool: "mock-database",
+              action: "query",
+              input: { table: "customers" },
+            });
+
+          const supportResult = (await query(supportCredential)).result as readonly {
+            email: string;
+            ssn: string;
+          }[];
+          const financeResult = (await query(financeCredential)).result as readonly {
+            email: string;
+            ssn: string;
+          }[];
+
+          // Same tool, same underlying data, same moment in time — the only
+          // variable is which agent asked.
+          expect(supportResult.every((row) => row.email === "[REDACTED:email]")).toBe(true);
+          expect(supportResult.every((row) => row.ssn === "[REDACTED:ssn]")).toBe(true);
+          expect(financeResult.some((row) => row.email === "ada@example.com")).toBe(true);
+          expect(financeResult.every((row) => row.ssn === "[REDACTED:ssn]")).toBe(true);
+
+          let financeEntries = await pullAuditLog({ auditUrl, agentDid: financeCredential.issuer });
+          for (let attempt = 0; financeEntries.length < 1 && attempt < 20; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            financeEntries = await pullAuditLog({ auditUrl, agentDid: financeCredential.issuer });
+          }
+          expect(financeEntries.every((entry) => entry.verified)).toBe(true);
+          expect([...(financeEntries[0]?.record?.detectedCategories ?? [])].sort()).toEqual([
+            "email",
+            "ssn",
+          ]);
+          expect(financeEntries[0]?.record?.redactedCategories).toEqual(["ssn"]);
         },
       );
     },
