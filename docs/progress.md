@@ -6,6 +6,45 @@ This is not the technical handover (that's section 0 of `CLAUDE.md`, written for
 
 ---
 
+## 2026-09-19 — Recovery: a broken file transfer wiped Phase 4, and it's been rebuilt
+
+**What happened:** moving this project to a new machine, the copy of the repository got interrupted partway through. `packages/`, `services/`, and `tooling/` — 141 tracked files, the entire shared-library and backend-service code — never arrived on disk. Everything committed through Phase 3 (identity, dispossession, revocation) was recoverable straight from git history. The Phase 4 (authorization allowlists + signed audit trail) work described in the 2026-09-12 entry below was not: it had been built and verified locally but never committed, so there was no git object to fall back on, and the working copy was gone too.
+
+**What survived the same transfer, uncorrupted:** the CLI commands that call into the (missing) Phase 4 logic (`grant.ts`, `audit-log.ts`), the new Phase 5 dashboard app, the Phase 4 database migration, `docs/adr/0006`, and — critically — `CLAUDE.md`'s section 0, which had recorded the lost work in enough function-by-function detail to serve as a real specification rather than a vague memory of what once existed.
+
+**What was done:** the Phase 0–3 baseline was restored from git, then Phase 4 was rebuilt from that specification: `packages/core/src/audit/record.ts` (the signed audit-record envelope), `services/vault`'s allowlist table and grant endpoint, its fire-and-forget audit reporter wired into token issuance and every tool call, and `services/audit`'s real implementation — including deliberately reproducing the read-time-signing design the original build arrived at only after finding the restart bug the hard way (see the 2026-09-12 entry). The full test suite, including the exact Phase 4 end-to-end scenario ("an agent may call the tool it was granted but not one it wasn't, and pulling the audit log shows both actions, independently verified"), passes against the rebuild.
+
+**Why it matters:** this is a second, independent confirmation that the CLAUDE.md handover discipline (CLAUDE.md section 12, "write it for a future Claude reading cold") does the job it was designed for — not just letting a new session pick up work, but letting it survive losing the work entirely.
+
+**Status:** Phase 4 is rebuilt and locally verified, same as the original 2026-09-12 milestone. Still not committed to `origin` — see the note at the top of the repository about which GitHub repo pushes now go to (`AgentID`, not `Custos`) before doing that.
+
+**Next up:** commit the rebuilt Phase 4, then continue Phase 5 (minimal SDK, README) — see the 2026-09-12 entry for what's still outstanding there.
+
+---
+
+## 2026-09-12 — Phase 4: Authorization & audit (built, verified locally — not yet pushed)
+
+**Commits:** none yet — this session's work is complete and verified (full test suite, end-to-end tests, and a manual test against the real running services) but has not been committed or pushed to `origin` yet.
+
+**Status:** Implemented and working, confirmed by both automated tests and by hand — literally starting the four real services, registering a real agent, and watching an allowed action succeed and a disallowed one get refused, in real time.
+
+**What this is:** Phases 1–3 gave every agent an identity, took away its permanent keys, and proved a compromised agent can be cut off in under a second. What was still missing: nothing stopped an agent from asking to use _any_ tool it wanted — access was all-or-nothing once an agent proved who it was. Phase 4 adds the missing piece: deciding **what each agent is specifically allowed to do**, and keeping a tamper-evident record of every time it tried.
+
+**How it works:**
+
+- An operator can now grant a specific agent access to a specific tool — one command (`custos grant`), one entry in a simple list. No grant means no access: the system defaults to refusing, not allowing, exactly the posture you'd want from a security product.
+- That check happens the moment an agent asks for temporary access to a tool, before it's ever handed a usable pass. An agent that was never granted Stripe access gets refused instantly and clearly — it never even gets close to touching the real tool.
+- Every single attempt an agent makes — whether it succeeds or gets refused — is now written to a brand-new fourth service, the audit trail. Each entry records who did it, what they tried to do, what kind of data that tool touches, which rule decided the outcome, and whether it was allowed or denied. It's signed, the same way a revocation notice is signed, so it can't be quietly edited after the fact.
+- Recording an action never slows down the actual request — the system fires off the audit entry in the background and moves on immediately, the same "don't wait around" principle that makes revocation fast.
+- A new command, `custos audit-log`, pulls that trail for any agent and checks every single entry's signature itself, independently — the same "don't just trust the database, verify it" principle already used to check an agent's identity.
+- **A genuine bug was caught by testing this against the real running services, not just inside the automated test suite.** The audit service's signing key was being regenerated every time the service restarted — completely normal for how every other service here already works — but that meant every historical audit entry would permanently stop verifying the moment the service restarted, which would have quietly broken the entire promise of the audit trail. The fix (borrowed directly from how the existing revocation notices already solve the identical problem) was to sign each entry fresh every time it's read back, rather than once when it's first written. Re-tested by hand — starting the service fresh with a brand-new key — to confirm old entries still check out.
+
+**Why it matters:** This is the difference between "we can revoke a bad agent" and "we can prove, to someone who doesn't trust us, exactly what every agent was allowed to do and what it actually did." That second property is the whole basis of the compliance angle Custos is exploring — proving which agent, acting under whose authority, touched what — and it's the last piece the MVP core needed before Phase 5 turns this into something a stranger could pick up and run themselves.
+
+**Next up:** Phase 5 — the developer-facing polish pass: a minimal SDK, a clean CLI, a visual moment for the revocation demo, and a README good enough that someone who isn't the author can complete the whole flow unassisted.
+
+---
+
 ## 2026-09-10 — Phase 3: Revocation engine (shipped)
 
 **Commits:** `b3b388f` — "feat: Phase 3 revocation engine - status list, signed tombstone push, deprovision"; two follow-up commits fixed CI issues unrelated to the feature itself (a known-vulnerable indirect dependency, and a third-party GitHub Action that had quietly moved to a newer, incompatible major version). Merged to `origin/main` via PR #28, and every automated check is green.

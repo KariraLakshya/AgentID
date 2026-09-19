@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 import { storeToolCredential } from "../credentials/store.js";
 import { createDb } from "../db/client.js";
+import { grantToolAccess } from "../policy/policy.js";
 import { issueToolToken } from "./issue.js";
 
 /** Nobody revoked — the baseline these tests assume. */
@@ -59,6 +60,7 @@ describe("issueToolToken", () => {
     await withRegisteredAgent(4211, async (credential) => {
       const tool = `test-tool-${randomUUID()}`;
       await storeToolCredential({ db: vaultDb, cipher, tool, secret: "sk_test_x" });
+      await grantToolAccess({ db: vaultDb, agentDid: credential.issuer, tool });
       const keyProvider = createLocalKeyProvider();
       const { keyId } = await keyProvider.createKeyPair();
       const now = new Date("2026-01-01T00:00:00Z");
@@ -171,6 +173,7 @@ describe("issueToolToken", () => {
     await withRegisteredAgent(4214, async (credential) => {
       const tool = `test-tool-${randomUUID()}`;
       await storeToolCredential({ db: vaultDb, cipher, tool, secret: "sk_test_x" });
+      await grantToolAccess({ db: vaultDb, agentDid: credential.issuer, tool });
       const failingKeyProvider = {
         createKeyPair: () => Promise.reject(new Error("unreachable")),
         sign: () => Promise.reject(new Error("kms unreachable")),
@@ -191,6 +194,53 @@ describe("issueToolToken", () => {
         ok: false,
         error: { code: "SIGNING_FAILED", reason: "kms unreachable" },
       });
+    });
+  });
+
+  it("denies a verified agent that was never granted access to the tool", async () => {
+    await withRegisteredAgent(4215, async (credential) => {
+      const tool = `test-tool-${randomUUID()}`;
+      await storeToolCredential({ db: vaultDb, cipher, tool, secret: "sk_test_x" });
+      // Deliberately no grantToolAccess call — deny by default.
+      const keyProvider = createLocalKeyProvider();
+      const { keyId } = await keyProvider.createKeyPair();
+
+      const result = await issueToolToken({
+        db: vaultDb,
+        keyProvider,
+        signingKeyId: keyId,
+        agentCredential: credential,
+        tool,
+        action: "list-customers",
+        now: new Date(),
+        revocation: neverRevoked,
+      });
+
+      expect(result).toEqual({ ok: false, error: { code: "POLICY_DENIED", tool } });
+    });
+  });
+
+  it("issues a token once access has been granted, after previously being denied", async () => {
+    await withRegisteredAgent(4216, async (credential) => {
+      const tool = `test-tool-${randomUUID()}`;
+      await storeToolCredential({ db: vaultDb, cipher, tool, secret: "sk_test_x" });
+      const keyProvider = createLocalKeyProvider();
+      const { keyId } = await keyProvider.createKeyPair();
+      const issueForThisAgent = () =>
+        issueToolToken({
+          db: vaultDb,
+          keyProvider,
+          signingKeyId: keyId,
+          agentCredential: credential,
+          tool,
+          action: "list-customers",
+          now: new Date(),
+          revocation: neverRevoked,
+        });
+
+      expect((await issueForThisAgent()).ok).toBe(false);
+      await grantToolAccess({ db: vaultDb, agentDid: credential.issuer, tool });
+      expect((await issueForThisAgent()).ok).toBe(true);
     });
   });
 });

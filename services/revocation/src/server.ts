@@ -121,6 +121,10 @@ export async function buildServer(options: {
   // missed push, replays these through the same verification path.
   app.get("/revocations", async (_request, reply) => {
     const result = await listTombstones({ db, signer: tombstoneSigner });
+    // Polled directly from the browser by apps/dashboard, a different origin
+    // — safe to open up because every tombstone is independently verifiable
+    // regardless of who fetched it.
+    reply.header("access-control-allow-origin", "*");
     if (!result.ok) {
       reply.code(502);
       return { error: result.error };

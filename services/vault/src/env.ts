@@ -17,6 +17,9 @@ export const envSchema = baseEnvSchema.extend({
   // allow list. Explicit configuration, never an accident.
   REVOCATION_MAX_STALENESS_MS: z.coerce.number().int().positive().default(30_000),
   REVOCATION_RESYNC_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
+  // Fire-and-forget destination for audit reporting (CLAUDE.md section 3):
+  // an unreachable audit service must never block or fail a request.
+  AUDIT_URL: z.string().min(1).default("http://localhost:4004"),
 });
 
 export type Env = z.infer<typeof envSchema>;

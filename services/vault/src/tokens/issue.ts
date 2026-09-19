@@ -7,7 +7,10 @@ import {
   type SignedCredential,
 } from "@custos/core";
 import { err, ok, type Result } from "@custos/contracts";
+import type { Connector } from "@custos/connectors";
 import { toolCredentialExists } from "../credentials/store.js";
+import { isToolAllowed } from "../policy/policy.js";
+import { createNoopAuditReporter, type AuditReporter } from "../audit/report.js";
 import type { VaultDb } from "../db/client.js";
 
 const DEFAULT_TTL_SECONDS = 60;
@@ -16,7 +19,15 @@ export type IssueToolTokenError =
   | { readonly code: "UNKNOWN_TOOL"; readonly tool: string }
   | { readonly code: "INVALID_AGENT_CREDENTIAL"; readonly reason: string }
   | { readonly code: "AGENT_REVOKED"; readonly agentId: string }
+  | { readonly code: "POLICY_DENIED"; readonly tool: string }
   | { readonly code: "SIGNING_FAILED"; readonly reason: string };
+
+function dataCategoriesFor(
+  tool: string,
+  connectors: ReadonlyMap<string, Connector>,
+): readonly string[] {
+  return connectors.get(tool)?.dataCategories ?? [];
+}
 
 export interface IssuedToolToken {
   readonly token: string;
@@ -63,6 +74,8 @@ export async function issueToolToken(params: {
   readonly now: Date;
   readonly ttlSeconds?: number;
   readonly revocation: { isRevoked(agentDid: string): boolean };
+  readonly connectors?: ReadonlyMap<string, Connector>;
+  readonly audit?: AuditReporter;
 }): Promise<Result<IssuedToolToken, IssueToolTokenError>> {
   const {
     db,
@@ -74,11 +87,22 @@ export async function issueToolToken(params: {
     now,
     revocation,
     ttlSeconds = DEFAULT_TTL_SECONDS,
+    connectors = new Map<string, Connector>(),
+    audit = createNoopAuditReporter(),
   } = params;
 
   // Checked before anything expensive: a revoked agent gets no new tokens,
   // so revocation closes the issuance path as well as the call path.
   if (revocation.isRevoked(agentCredential.issuer)) {
+    audit.report({
+      agentDid: agentCredential.issuer,
+      tool,
+      action,
+      dataCategories: dataCategoriesFor(tool, connectors),
+      policy: { rule: "revocation", decision: "deny" },
+      reason: "agent is revoked",
+      now,
+    });
     return err({ code: "AGENT_REVOKED", agentId: agentCredential.issuer });
   }
 
@@ -97,6 +121,23 @@ export async function issueToolToken(params: {
   });
   if (!verified.ok) {
     return err({ code: "INVALID_AGENT_CREDENTIAL", reason: verified.error.code });
+  }
+
+  // Authorization is meaningless against an unauthenticated identity, so
+  // this is checked after credential verification, not before (ADR 0006).
+  // A token is already scoped to one tool, so there is nothing further for
+  // the hot path to re-check once issuance for an ungranted tool is refused.
+  if (!(await isToolAllowed(db, agentCredential.issuer, tool))) {
+    audit.report({
+      agentDid: agentCredential.issuer,
+      tool,
+      action,
+      dataCategories: dataCategoriesFor(tool, connectors),
+      policy: { rule: "allowlist", decision: "deny" },
+      reason: `no grant for tool "${tool}"`,
+      now,
+    });
+    return err({ code: "POLICY_DENIED", tool });
   }
 
   const iat = Math.floor(now.getTime() / 1000);

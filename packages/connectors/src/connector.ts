@@ -10,6 +10,14 @@ export type ConnectorCallError =
 export interface Connector {
   readonly tool: string;
   /**
+   * Fixed declaration of what kind of data this tool touches at all (e.g.
+   * Stripe: `["payment-customer-data"]`) — not per-call classification of
+   * what a specific response actually contained, which is out of scope
+   * (CLAUDE.md section 2). Feeds the audit record's `dataCategories` field;
+   * see docs/adr/0006-authorization-and-audit-architecture.md.
+   */
+  readonly dataCategories: readonly string[];
+  /**
    * Invokes one scoped action against the tool, using a credential the
    * caller has already decrypted — the connector never stores or logs it.
    *

@@ -174,6 +174,13 @@ describe("vault service", () => {
       });
       expect(seed.statusCode).toBe(201);
 
+      const grant = await app.inject({
+        method: "POST",
+        url: "/policies",
+        payload: { agentId: credential.issuer, tool: "mock-slack" },
+      });
+      expect(grant.statusCode).toBe(201);
+
       const tokenResponse = await app.inject({
         method: "POST",
         url: "/tokens",
@@ -280,6 +287,11 @@ describe("vault service", () => {
         url: "/credentials",
         payload: { tool: "mock-database", secret: "unused-by-the-mock" },
       });
+      await app.inject({
+        method: "POST",
+        url: "/policies",
+        payload: { agentId: credential.issuer, tool: "mock-database" },
+      });
       const tokenResponse = await app.inject({
         method: "POST",
         url: "/tokens",
@@ -295,6 +307,74 @@ describe("vault service", () => {
 
       expect(callResponse.statusCode).toBe(502);
       expect(callResponse.json().error.code).toBe("UPSTREAM_ERROR");
+    });
+  });
+
+  describe("authorization (Phase 4: allowlists)", () => {
+    it("400s a malformed /policies grant", async () => {
+      const app = await buildServer({
+        db: vaultDb,
+        cipher,
+        revocation: freshEmptyRevocationCache(),
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/policies",
+        payload: { tool: "x" },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("403s a token request for a tool the agent was never granted", async () => {
+      await withRegisteredAgent(4504, async (credential) => {
+        const app = await buildServer({
+          db: vaultDb,
+          cipher,
+          revocation: freshEmptyRevocationCache(),
+        });
+        await app.inject({
+          method: "POST",
+          url: "/credentials",
+          payload: { tool: "mock-database", secret: "unused-by-the-mock" },
+        });
+        // Deliberately no /policies grant.
+        const response = await app.inject({
+          method: "POST",
+          url: "/tokens",
+          payload: { tool: "mock-database", action: "query", credential },
+        });
+        expect(response.statusCode).toBe(403);
+        expect(response.json().error.code).toBe("POLICY_DENIED");
+      });
+    });
+
+    it("grants access via /policies and then permits a token request for that tool", async () => {
+      await withRegisteredAgent(4505, async (credential) => {
+        const app = await buildServer({
+          db: vaultDb,
+          cipher,
+          revocation: freshEmptyRevocationCache(),
+        });
+        await app.inject({
+          method: "POST",
+          url: "/credentials",
+          payload: { tool: "mock-database", secret: "unused-by-the-mock" },
+        });
+        const grant = await app.inject({
+          method: "POST",
+          url: "/policies",
+          payload: { agentId: credential.issuer, tool: "mock-database" },
+        });
+        expect(grant.statusCode).toBe(201);
+        expect(grant.json()).toEqual({ agentId: credential.issuer, tool: "mock-database" });
+
+        const response = await app.inject({
+          method: "POST",
+          url: "/tokens",
+          payload: { tool: "mock-database", action: "query", credential },
+        });
+        expect(response.statusCode).toBe(200);
+      });
     });
   });
 
@@ -331,6 +411,11 @@ describe("vault service", () => {
               method: "POST",
               url: "/credentials",
               payload: { tool: "mock-slack", secret: "xoxb-fake-bot-token" },
+            });
+            await app.inject({
+              method: "POST",
+              url: "/policies",
+              payload: { agentId: credential.issuer, tool: "mock-slack" },
             });
 
             // Works before revocation.

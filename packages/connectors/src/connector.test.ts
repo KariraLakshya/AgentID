@@ -9,6 +9,7 @@ describe("Connector", () => {
     const revoked: string[] = [];
     const fake: Connector = {
       tool: "github",
+      dataCategories: ["code-repository-content"],
       call: async ({ action }) => ok({ action }),
       revoke: async (agentId) => {
         revoked.push(agentId);

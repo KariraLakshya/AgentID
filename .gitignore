@@ -13,3 +13,5 @@ Thumbs.db
 .claude/
 *.tsbuildinfo
 .pnpm-store/
+.smoke-tmp/
+graphify-out/

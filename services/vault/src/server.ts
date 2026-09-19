@@ -12,6 +12,12 @@ import { storeToolCredential } from "./credentials/store.js";
 import { issueToolToken } from "./tokens/issue.js";
 import { invokeTool } from "./calls/invoke.js";
 import { createRevocationCache, type RevocationCache } from "./revocation/cache.js";
+import { grantToolAccess } from "./policy/policy.js";
+import {
+  createHttpAuditReporter,
+  createNoopAuditReporter,
+  type AuditReporter,
+} from "./audit/report.js";
 import type { VaultDb } from "./db/client.js";
 
 // Re-exported so other packages' e2e tests can boot a real instance of this
@@ -39,6 +45,11 @@ const tombstoneSchema = z.object({
   tombstone: z.string().min(1),
 });
 
+const grantSchema = z.object({
+  agentId: z.string().min(1),
+  tool: z.string().min(1),
+});
+
 function statusFor(code: string): number {
   if (code === "UNKNOWN_TOOL") return 404;
   if (
@@ -48,9 +59,9 @@ function statusFor(code: string): number {
   ) {
     return 401;
   }
-  // A revoked agent is authenticated but no longer permitted, and a stale
-  // local view means we cannot safely say either way — both deny.
-  if (code === "AGENT_REVOKED") return 403;
+  // A revoked agent is authenticated but no longer permitted, and an
+  // ungranted tool is the same shape of "no" — both deny.
+  if (code === "AGENT_REVOKED" || code === "POLICY_DENIED") return 403;
   if (code === "REVOCATION_STATE_STALE") return 503;
   if (code === "UNKNOWN_ACTION" || code === "INVALID_INPUT") return 400;
   return 502;
@@ -77,6 +88,8 @@ export async function buildServer(options: {
   readonly revocationMaxStalenessMs?: number;
   /** Omitted in tests, which drive the cache directly and deterministically. */
   readonly revocationResyncIntervalMs?: number;
+  /** Base URL of the audit service. Omitted: audit reporting is a no-op. */
+  readonly auditUrl?: string;
 }): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ loggerInstance: createLogger({ level: "silent" }) });
   const { db, cipher } = options;
@@ -86,6 +99,12 @@ export async function buildServer(options: {
   const keyProvider = options.keyProvider ?? createLocalKeyProvider();
   const clock = options.clock ?? { now: () => new Date() };
   const { keyId: signingKeyId, publicKey: vaultPublicKey } = await keyProvider.createKeyPair();
+  const audit: AuditReporter = options.auditUrl
+    ? createHttpAuditReporter({
+        auditUrl: options.auditUrl,
+        onError: (error) => app.log.warn({ err: error }, "audit report failed"),
+      })
+    : createNoopAuditReporter();
 
   const revocation =
     options.revocation ??
@@ -151,6 +170,21 @@ export async function buildServer(options: {
     return { revoked: accepted.value };
   });
 
+  app.post("/policies", async (request, reply) => {
+    const body = grantSchema.safeParse(request.body);
+    if (!body.success) {
+      reply.code(400);
+      return { error: "INVALID_INPUT" };
+    }
+    const granted = await grantToolAccess({
+      db,
+      agentDid: body.data.agentId,
+      tool: body.data.tool,
+    });
+    reply.code(201);
+    return { agentId: granted.agentDid, tool: granted.tool };
+  });
+
   app.post("/credentials", async (request, reply) => {
     const body = storeCredentialSchema.safeParse(request.body);
     if (!body.success) {
@@ -177,6 +211,8 @@ export async function buildServer(options: {
       action: body.data.action,
       now: clock.now(),
       revocation,
+      connectors: connectorsByTool,
+      audit,
     });
     if (!result.ok) {
       reply.code(statusFor(result.error.code));
@@ -201,6 +237,7 @@ export async function buildServer(options: {
       input: body.data.input,
       now: clock.now(),
       revocation,
+      audit,
     });
     if (!result.ok) {
       reply.code(statusFor(result.error.code));
