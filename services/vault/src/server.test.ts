@@ -378,6 +378,90 @@ describe("vault service", () => {
     });
   });
 
+  describe("data layer (PII redaction)", () => {
+    it("400s a malformed /data-grants grant", async () => {
+      const app = await buildServer({
+        db: vaultDb,
+        cipher,
+        revocation: freshEmptyRevocationCache(),
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/data-grants",
+        payload: { category: "email" },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("redacts PII in a tool's response by default, and reveals it once the category is granted", async () => {
+      await withRegisteredAgent(4506, async (credential) => {
+        const connector = createMockDatabaseConnector();
+        const app = await buildServer({
+          db: vaultDb,
+          cipher,
+          revocation: freshEmptyRevocationCache(),
+          connectors: [connector],
+        });
+        await app.inject({
+          method: "POST",
+          url: "/credentials",
+          payload: { tool: "mock-database", secret: "unused-by-the-mock" },
+        });
+        await app.inject({
+          method: "POST",
+          url: "/policies",
+          payload: { agentId: credential.issuer, tool: "mock-database" },
+        });
+
+        const tokenBefore = await app.inject({
+          method: "POST",
+          url: "/tokens",
+          payload: { tool: "mock-database", action: "query", credential },
+        });
+        const callBefore = await app.inject({
+          method: "POST",
+          url: "/call",
+          payload: {
+            token: tokenBefore.json().token,
+            action: "query",
+            input: { table: "customers" },
+          },
+        });
+        expect(callBefore.statusCode).toBe(200);
+        const rowsBefore = callBefore.json().result as readonly { email: string }[];
+        expect(rowsBefore.every((row) => row.email === "[REDACTED:email]")).toBe(true);
+
+        const grant = await app.inject({
+          method: "POST",
+          url: "/data-grants",
+          payload: { agentId: credential.issuer, category: "email" },
+        });
+        expect(grant.statusCode).toBe(201);
+        expect(grant.json()).toEqual({ agentId: credential.issuer, category: "email" });
+
+        const tokenAfter = await app.inject({
+          method: "POST",
+          url: "/tokens",
+          payload: { tool: "mock-database", action: "query", credential },
+        });
+        const callAfter = await app.inject({
+          method: "POST",
+          url: "/call",
+          payload: {
+            token: tokenAfter.json().token,
+            action: "query",
+            input: { table: "customers" },
+          },
+        });
+        expect(callAfter.statusCode).toBe(200);
+        const rowsAfter = callAfter.json().result as readonly { email: string; ssn: string }[];
+        expect(rowsAfter[0]?.email).toBe("ada@example.com");
+        // ssn was never granted — still redacted even though email now isn't.
+        expect(rowsAfter[0]?.ssn).toBe("[REDACTED:ssn]");
+      });
+    });
+  });
+
   describe("revocation", () => {
     it("reports a fresh-boot vault as stale before its first resync", async () => {
       // No revocationResyncIntervalMs: the real cache is built but never

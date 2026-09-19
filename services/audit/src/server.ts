@@ -17,6 +17,8 @@ const appendSchema = z.object({
   dataCategories: z.array(z.string()),
   policy: z.object({ rule: z.string().min(1), decision: z.enum(["allow", "deny"]) }),
   reason: z.string().optional(),
+  detectedCategories: z.array(z.string()).optional(),
+  redactedCategories: z.array(z.string()).optional(),
   recordedAt: z.string().min(1),
 });
 

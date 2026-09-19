@@ -1,8 +1,9 @@
-import { verifyScopedToken, type SecretCipher } from "@custos/core";
+import { PII_CATEGORIES, scanAndRedact, verifyScopedToken, type SecretCipher } from "@custos/core";
 import { err, type Result } from "@custos/contracts";
 import type { Connector, ConnectorCallError } from "@custos/connectors";
 import { loadToolCredential } from "../credentials/store.js";
 import { createNoopAuditReporter, type AuditReporter } from "../audit/report.js";
+import type { DataGrantCache } from "../policy/data-grants.js";
 import type { VaultDb } from "../db/client.js";
 
 function connectorErrorReason(error: ConnectorCallError): string {
@@ -48,6 +49,7 @@ export async function invokeTool(params: {
   readonly now: Date;
   readonly revocation: RevocationGate;
   readonly audit?: AuditReporter;
+  readonly dataGrants?: DataGrantCache;
 }): Promise<Result<unknown, InvokeToolError>> {
   const {
     db,
@@ -60,6 +62,7 @@ export async function invokeTool(params: {
     now,
     revocation,
     audit = createNoopAuditReporter(),
+    dataGrants,
   } = params;
 
   const verified = verifyScopedToken({ token, publicKey: vaultPublicKey, now });
@@ -70,7 +73,13 @@ export async function invokeTool(params: {
   }
   const claims = verified.value;
   const dataCategories = connectors.get(claims.tool)?.dataCategories ?? [];
-  const report = (outcome: { rule: string; decision: "allow" | "deny"; reason?: string }): void =>
+  const report = (outcome: {
+    rule: string;
+    decision: "allow" | "deny";
+    reason?: string;
+    detectedCategories?: readonly string[];
+    redactedCategories?: readonly string[];
+  }): void =>
     audit.report({
       agentDid: claims.sub,
       tool: claims.tool,
@@ -78,6 +87,12 @@ export async function invokeTool(params: {
       dataCategories,
       policy: { rule: outcome.rule, decision: outcome.decision },
       ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+      ...(outcome.detectedCategories === undefined
+        ? {}
+        : { detectedCategories: outcome.detectedCategories }),
+      ...(outcome.redactedCategories === undefined
+        ? {}
+        : { redactedCategories: outcome.redactedCategories }),
       now,
     });
 
@@ -128,6 +143,25 @@ export async function invokeTool(params: {
     report({ rule: "connector", decision: "deny", reason: connectorErrorReason(result.error) });
     return result;
   }
-  report({ rule: "allowlist", decision: "allow" });
-  return result;
+
+  // Live pattern scan (packages/core/src/pii/detect.ts) over the actual
+  // response — distinct from, and layered on top of, the connector's own
+  // static `dataCategories` declaration. Masks any PII category this agent
+  // holds no data grant for; the audit record names exactly what was found
+  // and what was withheld, on the same "allow" event as the call itself.
+  const allowedCategories = new Set(
+    PII_CATEGORIES.filter((category) => dataGrants?.isAllowed(claims.sub, category) ?? false),
+  );
+  const { output, detected, redacted } = scanAndRedact({
+    value: result.value,
+    allowedCategories,
+  });
+  report({
+    rule: "allowlist",
+    decision: "allow",
+    ...(redacted.length > 0 ? { reason: `masked PII categories: ${redacted.join(", ")}` } : {}),
+    detectedCategories: detected,
+    redactedCategories: redacted,
+  });
+  return { ok: true, value: output };
 }

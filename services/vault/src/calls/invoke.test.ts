@@ -11,6 +11,7 @@ import type { Connector } from "@custos/connectors";
 import { afterAll, describe, expect, it } from "vitest";
 import { storeToolCredential } from "../credentials/store.js";
 import { createDb } from "../db/client.js";
+import { createDataGrantCache } from "../policy/data-grants.js";
 import { invokeTool } from "./invoke.js";
 
 /** Nobody revoked, state fresh — the baseline these tests assume. */
@@ -249,5 +250,119 @@ describe("invokeTool", () => {
     });
 
     expect(result).toEqual({ ok: false, error: { code: "UNKNOWN_ACTION", action: "reject-me" } });
+  });
+
+  describe("PII redaction (data layer)", () => {
+    function connectorReturning(tool: string, value: unknown): Connector {
+      return {
+        tool,
+        dataCategories: [],
+        async call() {
+          return ok(value);
+        },
+        async revoke() {
+          // not exercised in these tests
+        },
+      };
+    }
+
+    it("redacts detected PII when the agent holds no data grant", async () => {
+      const tool = `test-tool-${randomUUID()}`;
+      await storeToolCredential({ db, cipher, tool, secret: "sk_test_x" });
+      const now = new Date();
+      const { token, publicKey } = await mintToken({
+        sub: "did:web:localhost:agents:a1",
+        tool,
+        action: "list",
+        iat: Math.floor(now.getTime() / 1000),
+        exp: Math.floor(now.getTime() / 1000) + 60,
+      });
+      const connector = connectorReturning(tool, { email: "ada@example.com" });
+
+      const result = await invokeTool({
+        db,
+        cipher,
+        connectors: new Map([[tool, connector]]),
+        token,
+        vaultPublicKey: publicKey,
+        action: "list",
+        input: {},
+        now,
+        revocation: neverRevoked,
+      });
+
+      expect(result).toEqual({ ok: true, value: { email: "[REDACTED:email]" } });
+    });
+
+    it("passes a category through unmasked once the agent's data grant allows it", async () => {
+      const tool = `test-tool-${randomUUID()}`;
+      await storeToolCredential({ db, cipher, tool, secret: "sk_test_x" });
+      const now = new Date();
+      const sub = "did:web:localhost:agents:a2";
+      const { token, publicKey } = await mintToken({
+        sub,
+        tool,
+        action: "list",
+        iat: Math.floor(now.getTime() / 1000),
+        exp: Math.floor(now.getTime() / 1000) + 60,
+      });
+      const connector = connectorReturning(tool, { email: "ada@example.com", ssn: "078-05-1120" });
+      const dataGrants = createDataGrantCache();
+      dataGrants.grant(sub, "email");
+
+      const result = await invokeTool({
+        db,
+        cipher,
+        connectors: new Map([[tool, connector]]),
+        token,
+        vaultPublicKey: publicKey,
+        action: "list",
+        input: {},
+        now,
+        revocation: neverRevoked,
+        dataGrants,
+      });
+
+      expect(result).toEqual({
+        ok: true,
+        value: { email: "ada@example.com", ssn: "[REDACTED:ssn]" },
+      });
+    });
+
+    it("reports what was detected and redacted on the audit trail", async () => {
+      const tool = `test-tool-${randomUUID()}`;
+      await storeToolCredential({ db, cipher, tool, secret: "sk_test_x" });
+      const now = new Date();
+      const { token, publicKey } = await mintToken({
+        sub: "did:web:localhost:agents:a3",
+        tool,
+        action: "list",
+        iat: Math.floor(now.getTime() / 1000),
+        exp: Math.floor(now.getTime() / 1000) + 60,
+      });
+      const connector = connectorReturning(tool, { email: "ada@example.com" });
+      const reported: unknown[] = [];
+      const audit = { report: (outcome: unknown) => reported.push(outcome) };
+
+      await invokeTool({
+        db,
+        cipher,
+        connectors: new Map([[tool, connector]]),
+        token,
+        vaultPublicKey: publicKey,
+        action: "list",
+        input: {},
+        now,
+        revocation: neverRevoked,
+        audit,
+      });
+
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toMatchObject({
+        policy: { rule: "allowlist", decision: "allow" },
+        detectedCategories: ["email"],
+        redactedCategories: ["email"],
+      });
+    });
   });
 });

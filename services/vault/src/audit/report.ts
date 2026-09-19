@@ -5,6 +5,8 @@ export interface AuditOutcome {
   readonly dataCategories: readonly string[];
   readonly policy: { readonly rule: string; readonly decision: "allow" | "deny" };
   readonly reason?: string;
+  readonly detectedCategories?: readonly string[];
+  readonly redactedCategories?: readonly string[];
   readonly now: Date;
 }
 
@@ -43,6 +45,12 @@ export function createHttpAuditReporter(params: {
         dataCategories: outcome.dataCategories,
         policy: outcome.policy,
         ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+        ...(outcome.detectedCategories === undefined
+          ? {}
+          : { detectedCategories: outcome.detectedCategories }),
+        ...(outcome.redactedCategories === undefined
+          ? {}
+          : { redactedCategories: outcome.redactedCategories }),
         recordedAt: outcome.now.toISOString(),
       };
       void fetchImpl(new URL("/records", auditUrl), {

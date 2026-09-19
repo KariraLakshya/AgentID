@@ -22,6 +22,15 @@ export interface AuditRecord {
   readonly dataCategories: readonly string[];
   readonly policy: { readonly rule: string; readonly decision: "allow" | "deny" };
   readonly reason?: string;
+  /**
+   * PII categories a live pattern scan found in this call's response
+   * (`packages/core/src/pii/detect.ts`), and the subset of those that were
+   * masked because the calling agent held no grant for them. Optional and
+   * omitted on records from before this existed, or for tools/records this
+   * scan never ran against (e.g. a denial with no response to scan).
+   */
+  readonly detectedCategories?: readonly string[];
+  readonly redactedCategories?: readonly string[];
   readonly recordedAt: string;
 }
 
@@ -57,6 +66,12 @@ function isAuditRecord(value: unknown): value is AuditRecord {
   if (!isStringArray(record.dataCategories)) return false;
   if (typeof record.recordedAt !== "string" || record.recordedAt.length === 0) return false;
   if (record.reason !== undefined && typeof record.reason !== "string") return false;
+  if (record.detectedCategories !== undefined && !isStringArray(record.detectedCategories)) {
+    return false;
+  }
+  if (record.redactedCategories !== undefined && !isStringArray(record.redactedCategories)) {
+    return false;
+  }
 
   const policy = record.policy as Record<string, unknown> | undefined;
   if (typeof policy !== "object" || policy === null) return false;
